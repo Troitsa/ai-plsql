@@ -1,0 +1,178 @@
+-- Задача 1: Расчет стипендии для студентов
+--
+-- drop database lab_work;
+
+
+
+-- Создаем базу данных
+create database lab_work;
+
+--
+-- Создаем схему
+create schema if not exists lab_work;
+
+--
+-- Создаем таблицу students
+create table if not exists students
+(
+    id          serial primary key,
+    name        text,
+    total_score integer
+);
+
+
+--
+-- Вносим данные в таблицу students
+insert into students (name, total_score)
+values ('Иван Петров', 85),
+       ('Василий Смирнов', 92),
+       ('Павел Кузнецов', 67),
+       ('Сергей Попов', 70),
+       ('Андрей Козлов', 94),
+       ('Александр Морозов', 91),
+       ('Роман Лебедев', 82),
+       ('Тимофей Новиков', 99),
+       ('Степан Орлов', 72),
+       ('Федор Волков', 87),
+       ('Михаил Зайцев', 89),
+       ('Олег Белов', 88),
+       ('Яков Чернов', 83),
+       ('Егор Рыбин', 95),
+       ('Николай Карпов', 92);
+
+
+--
+-- Создаем таблицу activity_scores
+create table if not exists activity_scores
+(
+    id            serial primary key,
+    student_id    integer references students (id),
+    activity_type text,
+    score         integer
+);
+--
+--
+-- Вносим данные в таблицу activity_scores
+insert into activity_scores (student_id, activity_type, score)
+values (1, 'Homework', 90),
+       (1, 'Exam', 78),
+       (2, 'Homework', 95),
+       (2, 'Exam', 88),
+       (3, 'Homework', 70),
+       (3, 'Exam', 82),
+       (4, 'Homework', 60),
+       (4, 'Exam', 72),
+       (5, 'Homework', 87),
+       (5, 'Exam', 95),
+       (6, 'Homework', 75),
+       (6, 'Exam', 68),
+       (7, 'Homework', 92),
+       (7, 'Exam', 89),
+       (8, 'Homework', 80),
+       (8, 'Exam', 76),
+       (9, 'Homework', 65),
+       (9, 'Exam', 72),
+       (10, 'Homework', 88),
+       (10, 'Exam', 90),
+       (11, 'Homework', 78),
+       (11, 'Exam', 84),
+       (12, 'Homework', 92),
+       (12, 'Exam', 91),
+       (13, 'Homework', 85),
+       (13, 'Exam', 89),
+       (14, 'Homework', 70),
+       (14, 'Exam', 75),
+       (15, 'Homework', 95),
+       (15, 'Exam', 92);
+
+
+--
+-- Создаем функцию calculate_scholarship
+create or replace function calculate_scholarship(student_id integer)
+    returns integer as
+$$
+declare
+    student_total_score integer;
+    scholarship_amount  integer;
+begin
+    -- Получение общего балла студента
+    select total_score into student_total_score from students where id = student_id;
+    -- Расчет стипендии в зависимости от общего балла
+    if student_total_score >= 90 then
+        scholarship_amount := 1000;
+    elsif student_total_score >= 80 then
+        scholarship_amount := 500;
+    else
+        scholarship_amount := 0;
+    end if;
+    return scholarship_amount;
+end;
+$$ language plpgsql;
+
+
+--
+--Создаем триггер update_scholarship_trigger
+create or replace function update_scholarship()
+    returns trigger as
+$$
+begin
+    -- Вызываем функцию calculate_scholarship для соответствующего студента
+    select calculate_scholarship(new.student_id) into new.score;
+
+    return new;
+end;
+$$ language plpgsql;
+-- Привязка триггера к таблице activity_scores
+create trigger update_scholarship_trigger
+    after update
+    on activity_scores
+    for each row
+execute function update_scholarship();
+
+--Рассмотрим данные о баллах и стипендии студента
+select s.id          as student_id,
+       s.name        as student_name,
+       s.total_score as student_total_score,
+       case
+           when s.total_score >= 90 then 1000
+           when s.total_score >= 80 then 500
+           else 0
+           end       as student_scholarship
+from students s
+order by student_scholarship desc, s.id;
+
+
+--Добавим данные о студентах и их баллах, чтобы проследить как автоматически обновляется стипендия после обновления баллов
+--на примере id 7 и id 15
+update students
+set total_score = total_score + 10
+where id in (7, 15);
+
+
+--Рассмотрим обновленные данные о баллах и стипендии студента
+select s.id          as student_id,
+       s.name        as student_name,
+       s.total_score as student_total_score,
+       case
+           when s.total_score >= 90 then 1000
+           when s.total_score >= 80 then 500
+           else 0
+           end       as student_scholarship
+from students s
+order by student_scholarship desc, s.id;
+
+--
+-- Создаем функцию update_total_score
+create or replace function update_total_score()
+    returns trigger as
+$$
+begin
+    update students
+    set total_score = (select coalesce(sum(score), 0)
+                       from activity_scores
+                       where student_id = new.student_id)
+    where id = new.student_id;
+
+    return new;
+end;
+$$ language plpgsql;
